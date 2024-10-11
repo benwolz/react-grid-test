@@ -6,89 +6,7 @@ import "@silevis/reactgrid/styles.css";
 import "./styles.scss";
 import { v4 as uuidv4 } from 'uuid';
 
-/* 
-  searches for a chevron cell in given row
-*/
-const findChevronCell = (row: Row) =>
-  row.cells.find((cell) => cell.type === "chevron") as ChevronCell | undefined;
-
-/* 
-  searches for a parent of given row
-*/
-const findParentRow = (rows: Row[], row: Row) =>
-  rows.find((r) => {
-    const foundChevronCell = findChevronCell(row);
-    return foundChevronCell ? r.rowId === foundChevronCell.parentId : false;
-  });
-
-/* 
-  check if the row has children
-*/
-const hasChildren = (rows: Row[], row: Row): boolean =>
-  rows.some((r) => {
-    const foundChevronCell = findChevronCell(r);
-    return foundChevronCell ? foundChevronCell.parentId === row.rowId : false;
-  });
-
-/* 
-  Checks is row expanded
-*/
-const isRowFullyExpanded = (rows: Row[], row: Row): boolean => {
-  const parentRow = findParentRow(rows, row);
-  if (parentRow) {
-    const foundChevronCell = findChevronCell(parentRow);
-    if (foundChevronCell && !foundChevronCell.isExpanded) return false;
-    return isRowFullyExpanded(rows, parentRow);
-  }
-  return true;
-};
-
-const getExpandedRows = (rows: Row[]): Row[] =>
-  rows.filter((row) => {
-    const areAllParentsExpanded = isRowFullyExpanded(rows, row);
-    return areAllParentsExpanded !== undefined ? areAllParentsExpanded : true;
-  });
-
-const getDirectChildRows = (rows: Row[], parentRow: Row): Row[] =>
-  rows.filter(
-    (row) =>
-      !!row.cells.find(
-        (cell) =>
-          cell.type === "chevron" &&
-          (cell as ChevronCell).parentId === parentRow.rowId
-      )
-  );
-
-const assignIndentAndHasChildren = (
-  rows: Row[],
-  parentRow: Row,
-  indent: number = 0
-) => {
-  ++indent;
-  getDirectChildRows(rows, parentRow).forEach((row) => {
-    const foundChevronCell = findChevronCell(row);
-    const hasRowChildrens = hasChildren(rows, row);
-    if (foundChevronCell) {
-      foundChevronCell.indent = indent;
-      foundChevronCell.hasChildren = hasRowChildrens;
-    }
-    if (hasRowChildrens) assignIndentAndHasChildren(rows, row, indent);
-  });
-};
-
-const buildTree = (rows: Row[]): Row[] =>
-  rows.map((row, index) => {
-    const foundChevronCell = findChevronCell(row);
-    if (foundChevronCell) {
-      foundChevronCell.text = index.toString();
-      if (!foundChevronCell.parentId) {
-        const hasRowChildrens = hasChildren(rows, row);
-        foundChevronCell.hasChildren = hasRowChildrens;
-        if (hasRowChildrens) assignIndentAndHasChildren(rows, row);
-      }
-    }
-    return row;
-  });
+import { buildTree, getDirectChildRows, findChevronCell, hasChildren, isRowFullyExpanded, getExpandedRows, addChildTask, removeRow, addTaskGroup } from "./utils";
 
 interface NestedGridProps {
   // Add any props if needed
@@ -118,6 +36,95 @@ export const NestedGrid: React.FC<NestedGridProps> = () => {
 
   const generateUniqueId = () => `row-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+  // const addRowAbove = (selectedRowIndex: number, selectedRow: Row, foundChevronCell: ChevronCell) => {
+  //   if (selectedRowIndex !== -1) {
+  //     const newRow = createNewRow(columns, rows, selectedRow, foundChevronCell);
+  //     const newRows = [
+  //       ...rows.slice(0, selectedRowIndex),
+  //       newRow,
+  //       ...rows.slice(selectedRowIndex)
+  //     ];
+  //     updateRows(newRows);
+  //   }
+  // };
+
+  const addRowBelow = (selectedRowIndex: number, selectedRow: Row, foundChevronCell: ChevronCell) => {
+    if (selectedRowIndex !== -1) {
+      const newRow = createNewRow(columns, rows, selectedRow, foundChevronCell);
+      const newRows = [
+        ...rows.slice(0, selectedRowIndex + 1),
+        newRow,
+        ...rows.slice(selectedRowIndex + 1)
+      ];
+      updateRows(newRows);
+    }
+  };
+
+  // const handleAddChildTask = (selectedRowIndex: number) => {
+  //   if (selectedRowIndex !== -1) {
+  //     const newRows = addChildTask(rows, selectedRowIndex);
+  //     updateRows(newRows);
+  //   }
+  // };
+
+  const handleAddTaskGroup = (selectedRowIndex: number) => {
+    if (selectedRowIndex !== -1) {
+      const newRows = addTaskGroup(rows, selectedRowIndex);
+      updateRows(newRows);
+    }
+  };
+
+  const promoteTask = (selectedRowId: Id) => {
+    const newRows = [...rows];
+    const selectedRowIndex = newRows.findIndex(row => row.rowId === selectedRowId);
+    const selectedRow = newRows[selectedRowIndex];
+    
+    const firstCell = selectedRow.cells[0];
+    if (firstCell.type === 'chevron' && firstCell.parentId !== undefined) {
+      const parentRowIndex = newRows.findIndex(row => row.rowId === firstCell.parentId);
+      
+      if (parentRowIndex !== -1) {
+        const parentRow = newRows[parentRowIndex];
+        const parentFirstCell = parentRow.cells[0];
+        const newRowId = generateUniqueId();
+        
+        // Update the selected row
+        const updatedSelectedRow = {
+          ...selectedRow,
+          rowId: newRowId,
+          cells: selectedRow.cells.map((cell, index) => {
+            if (index === 0 && cell.type === 'chevron') {
+              return {
+                ...cell,
+                text: newRowId,
+                parentId: parentFirstCell.type === 'chevron' ? parentFirstCell.parentId : undefined,
+                isExpanded: false
+              };
+            }
+            return cell;
+          })
+        };
+
+        // Remove the old row and insert the updated one
+        newRows.splice(selectedRowIndex, 1);
+        newRows.splice(parentRowIndex + 1, 0, updatedSelectedRow);
+
+        updateRows(newRows);
+      }
+    }
+  };
+
+  const updateRows = (newRows: Row[]) => {
+    const updatedRows = buildTree(newRows);
+    setRows(updatedRows);
+    setRowsToRender([headerRow, ...getExpandedRows(updatedRows)]);
+  };
+
+  const handleRemoveRow = (selectedRowId: Id) => {
+    const newRows = removeRow(rows, selectedRowId);
+    updateRows(newRows);
+  };
+
   const handleContextMenu = (
     selectedRowIds: Id[],
     selectedColIds: Id[],
@@ -130,146 +137,96 @@ export const NestedGrid: React.FC<NestedGridProps> = () => {
       const selectedRow = rows.find(row => row.rowId === selectedRowId) as Row;
       const foundChevronCell = findChevronCell(selectedRow);
 
+      // const addRowAboveOption: MenuOption = {
+      //   id: 'addRowAbove',
+      //   label: 'Add Row Above',
+      //   handler: () => addRowAbove(selectedRowIndex, selectedRow, foundChevronCell!)
+      // };
+
       const addRowBelowOption: MenuOption = {
-        id: 'addRowBelow',
-        label: 'Add Row Below',
-        handler: () => {
-          if (selectedRowIndex !== -1) {
-            const newRow = createNewRow(columns, rows, selectedRow, foundChevronCell!);
-            const newRows = [
-              ...rows.slice(0, selectedRowIndex + 1),
-              newRow,
-              ...rows.slice(selectedRowIndex + 1)
-            ];
-            setRows(newRows);
-            // Rebuild the tree and update the rendered rows
-            const updatedRows = buildTree(newRows);
-            setRows(updatedRows);
-            setRowsToRender([headerRow, ...getExpandedRows(updatedRows)]);
-          }
-        }
+        id: 'addTaskBelow',
+        label: 'Add Task Below',
+        handler: () => addRowBelow(selectedRowIndex, selectedRow, foundChevronCell!)
       };
 
-      const addRowAboveOption: MenuOption = {
-        id: 'addRowAbove',
-        label: 'Add Row Above',
-        handler: () => {
-          if (selectedRowIndex !== -1) {
-            const newRow = createNewRow(columns, rows, selectedRow, foundChevronCell!);
-            const newRows = [
-              ...rows.slice(0, selectedRowIndex),
-              newRow,
-              ...rows.slice(selectedRowIndex)
-            ];
-            setRows(newRows);
-            // Rebuild the tree and update the rendered rows
-            const updatedRows = buildTree(newRows);
-            setRows(updatedRows);
-            setRowsToRender([headerRow, ...getExpandedRows(updatedRows)]);
-          }
-        }
+      // const makeChildTaskOption: MenuOption = {
+      //   id: 'addChildTask',
+      //   label: 'Add Child Task',
+      //   handler: () => handleAddChildTask(selectedRowIndex)
+      // };
+
+      const addTaskGroupOption: MenuOption = {
+        id: 'addTaskGroupBelow',
+        label: 'Add Task Group Below',
+        handler: () => handleAddTaskGroup(selectedRowIndex)
+      }
+
+      // const promoteTaskOption: MenuOption = {
+      //   id: 'promoteTask',
+      //   label: 'Promote Task',
+      //   handler: () => promoteTask(selectedRowId)
+      // };
+
+      const removeTaskOption: MenuOption = {
+        id: 'removeTask',
+        label: 'Remove Task',
+        handler: () => handleRemoveRow(selectedRowId)
       };
 
-      const makeChildTaskOption: MenuOption = {
-        id: 'makeChildTask',
-        label: 'Make Child Task',
-        handler: () => {
-          if (selectedRowIndex > 0) {
-            const newRows = [...rows];
-            const parentRow = newRows[selectedRowIndex - 1];
-            const newRowId = generateUniqueId();
-            const updatedSelectedRow = {
-              ...selectedRow,
-              rowId: newRowId,
-              cells: selectedRow.cells.map((cell, index) => {
-                if (index === 0 && cell.type === 'chevron') {
-                  return {
-                    ...cell,
-                    text: newRowId,
-                    parentId: parentRow.rowId,
-                    isExpanded: false
-                  };
-                }
-                return cell;
-              })
-            };
-            newRows[selectedRowIndex] = updatedSelectedRow;
-            
-            // Update the parent row to ensure it's expanded
-            newRows[selectedRowIndex - 1] = {
-              ...parentRow,
-              cells: parentRow.cells.map((cell, index) => {
-                if (index === 0 && cell.type === 'chevron') {
-                  return {
-                    ...cell,
-                    isExpanded: true
-                  };
-                }
-                return cell;
-              })
-            };
-
-            setRows(newRows);
-            const updatedRows = buildTree(newRows);
-            setRows(updatedRows);
-            setRowsToRender([headerRow, ...getExpandedRows(updatedRows)]);
-          }
-        }
-      };
-
-      const promoteTaskOption: MenuOption = {
-        id: 'promoteTask',
-        label: 'Promote Task',
-        handler: () => {
-          const newRows = [...rows];
-          const selectedRowIndex = newRows.findIndex(row => row.rowId === selectedRowId);
-          const selectedRow = newRows[selectedRowIndex];
-          
-          const firstCell = selectedRow.cells[0];
-          if (firstCell.type === 'chevron' && firstCell.parentId !== undefined) {
-            const parentRowIndex = newRows.findIndex(row => row.rowId === firstCell.parentId);
-            
-            if (parentRowIndex !== -1) {
-              const parentRow = newRows[parentRowIndex];
-              const parentFirstCell = parentRow.cells[0];
-              const newRowId = generateUniqueId();
-              
-              // Update the selected row
-              const updatedSelectedRow = {
-                ...selectedRow,
-                rowId: newRowId,
-                cells: selectedRow.cells.map((cell, index) => {
-                  if (index === 0 && cell.type === 'chevron') {
-                    return {
-                      ...cell,
-                      text: newRowId,
-                      parentId: parentFirstCell.type === 'chevron' ? parentFirstCell.parentId : undefined,
-                      isExpanded: false
-                    };
-                  }
-                  return cell;
-                })
-              };
-
-              // Remove the old row and insert the updated one
-              newRows.splice(selectedRowIndex, 1);
-              newRows.splice(parentRowIndex + 1, 0, updatedSelectedRow);
-
-              setRows(newRows);
-              const updatedRows = buildTree(newRows);
-              setRows(updatedRows);
-              setRowsToRender([headerRow, ...getExpandedRows(updatedRows)]);
-            }
-          }
-        }
-      };
-
-      // Add more options as needed
-
-      return [...menuOptions, addRowBelowOption, addRowAboveOption, makeChildTaskOption, promoteTaskOption];
+      return [addRowBelowOption, addTaskGroupOption, removeTaskOption];
+      // return [...menuOptions, addRowBelowOption, addRowAboveOption, makeChildTaskOption, promoteTaskOption, removeRowOption];
     }
     return menuOptions;
   };
+
+  const getRowWithDescendants = (rows: Row[], rowId: Id): Row[] => {
+    const rowIndex = rows.findIndex(row => row.rowId === rowId);
+    if (rowIndex === -1) return [];
+
+    const result = [rows[rowIndex]];
+    let currentIndex = rowIndex + 1;
+
+    while (currentIndex < rows.length) {
+      const currentRow = rows[currentIndex];
+      const currentChevron = currentRow.cells[0] as ChevronCell;
+      const parentChevron = result[0].cells[0] as ChevronCell;
+
+      if (currentChevron.indent! <= parentChevron.indent!) break;
+      result.push(currentRow);
+      currentIndex++;
+    }
+
+    return result;
+  };
+
+  const handleRowsReorder = (targetRowId: Id, rowIds: Id[]) => {
+    console.log("Reordering rows");
+    console.log(targetRowId, rowIds);
+    setRows((prevRows) => {
+      let newRows = [...prevRows];
+      const to = newRows.findIndex(row => row.rowId === targetRowId);
+      
+      // Collect all rows to be moved, including their descendants
+      const rowsToMove: Row[] = [];
+      rowIds.forEach(id => {
+        const rowWithDescendants = getRowWithDescendants(newRows, id);
+        rowsToMove.push(...rowWithDescendants);
+      });
+
+      // Remove the rows from their original positions
+      newRows = newRows.filter(row => !rowsToMove.some(r => r.rowId === row.rowId));
+      
+      // Insert the rows at their new position
+      newRows.splice(to, 0, ...rowsToMove);
+      
+      return newRows;
+    });
+  };
+
+  // Use effect to update rowsToRender when rows change
+  React.useEffect(() => {
+    setRowsToRender([headerRow, ...getExpandedRows(rows)]);
+  }, [rows]);
 
   return (
     <div>
@@ -278,6 +235,7 @@ export const NestedGrid: React.FC<NestedGridProps> = () => {
         columns={columns} 
         onContextMenu={handleContextMenu}
         onCellsChanged={handleChanges}
+        // onRowsReordered={handleRowsReorder}
         enableRowSelection
         enableColumnSelection
       />

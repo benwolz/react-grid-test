@@ -1,6 +1,5 @@
 import { Row } from "@silevis/reactgrid";
 
-
 const height = 25;
 
 export const headerRow: Row = {
@@ -20,7 +19,7 @@ export const rows = (reorderable: boolean): Row[] => [
     height,
     reorderable,
     cells: [
-      { type: "chevron", text: "1", isExpanded: true, nonEditable: true },
+      { type: "chevron", text: "1", isExpanded: true },
       { type: "text", text: "e989109363ec42610966f85fe9b065e6017058f7" },
       { type: "text", text: "1234" }    ]
   },
